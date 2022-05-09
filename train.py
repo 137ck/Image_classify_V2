@@ -45,7 +45,7 @@ def main():
         input_num=25088
     
     model.classifier = classifier_new
-    data_loaders, image_datasets, data_transforms = data_parser(args.data_path)
+    train_dataloader,valid_dataloader,test_dataloader, image_datasets, data_transforms = data_parser(args.data_path)
         
     if args.cuda:
        model = model.cuda()
@@ -53,9 +53,10 @@ def main():
     criterion = nn.NLLLoss()
     optimizer = optim.Adam(model.classifier.parameters(), lr=args.lr)
     
-    train_model(model, data_loaders[0], criterion=criterion, optimizer=optimizer, epochs=int(args.epochs), cuda=args.cuda)
+    train_model(model,train_dataloader, valid_dataloader,
+                criterion=criterion, optimizer=optimizer, epochs=int(args.epochs), cuda=args.cuda)
     
-    test_model(model, data_loaders[2], cuda=args.cuda)
+    test_model(model, test_dataloader, cuda=args.cuda)
 
     checkpoint = {'input_size': input_num,
                   'output_size': 102,
@@ -75,11 +76,11 @@ def main():
 def get_arguments():
     parser = argparse.ArgumentParser()
     parser.add_argument("--save_dir", action="store", dest="save_dir", default="." , help = "Choose directory to save                                       checkpoints")
-    parser.add_argument("--model", action="store", dest="model", default="densenet121" , help = "Choose architechture('densenet121'                         or'vgg19')")
-    parser.add_argument("--learning_rate", action="store", dest="lr", default=0.003 , help = "Set learning rate into system")
-    parser.add_argument("--hidden_layers", action="store", dest="hidden_layers", default=512 , help = "Set number of hidden layers")
-    parser.add_argument("--epochs", action="store", dest="epochs", default=5 , help = "Set number of epochs in system")
-    parser.add_argument("--gpu", action="store_true", dest="cuda", default=False , help = "Use CUDA for AI training")
+    parser.add_argument("--model", action="store", dest="model", default="densenet121" , help = "Choose architechture('densenet121'or'vgg19')")
+    parser.add_argument("--learning_rate", action="store", dest="lr", default=0.003 , help = "Put learning rate into system")
+    parser.add_argument("--hidden_layers", action="store", dest="hidden_layers", default=512 , help = "Put number of hidden layers")
+    parser.add_argument("--epochs", action="store", dest="epochs", default=5 , help = "Put number of epochs in system")
+    parser.add_argument("--gpu", action="store_true", dest="cuda", default=True , help = "Use CUDA for AI training")
     parser.add_argument('--data_path', action="store",dest='data_path',default='ImageClassifier/flowers')
     return parser.parse_args()
 
@@ -113,11 +114,12 @@ def data_parser(data_path):
     train_dataloader = torch.utils.data.DataLoader(train_datasets,batch_size=64,shuffle=True)
     valid_dataloader = torch.utils.data.DataLoader(valid_datasets,batch_size=64)
     test_dataloader = torch.utils.data.DataLoader(test_datasets,batch_size=64)
-    dataloaders = [train_dataloader,valid_dataloader,test_dataloader]     
+#     data_loaders = [train_dataloader,valid_dataloader,test_dataloader]     
     
-    return dataloaders, image_datasets, data_transforms
+    return train_dataloader,valid_dataloader,test_dataloader,image_datasets, data_transforms
 
-def train_model(model, dataloaders, criterion, optimizer, epochs=15, cuda=False):
+def train_model(model, train_dataloader, valid_dataloader,
+                criterion, optimizer, epochs=15, cuda=True):
     counts = 0   
     screen_every = 30
     running_loss=0
@@ -128,7 +130,7 @@ def train_model(model, dataloaders, criterion, optimizer, epochs=15, cuda=False)
         model.cpu()
 
     for epoch in range(epochs):
-        for images,labels in dataloaders[0]:
+        for images,labels in train_dataloader:
             epoch+= 1
             if cuda:
                 images, labels = images.cuda(), labels.cuda()
@@ -140,19 +142,19 @@ def train_model(model, dataloaders, criterion, optimizer, epochs=15, cuda=False)
             loss = criterion(logps, labels)
             loss.backward()
             optimizer.step()
-            running_loss += loss.data[0]
+            running_loss += loss.item()
             
-            if steps % screen_every == 0:
+            if counts % screen_every == 0:
                 model.eval()
                 valid_loss = 0
                 accuracy = 0
                 with torch.no_grad():
-                    for images,labels in dataloaders[1]:
-                        logps = model.forward(inputs)
+                    for images,labels in valid_dataloader:
+                        logps = model.forward(images)
                         valid_loss += criterion(logps, labels).item()
                         ps = torch.exp(logps)
                         top_ps, top_class=ps.topk(1,dim=1)
-                        equality=top_class==labels.view(*top_class.shape)                                                                     
+                        equality=top_class==labels.view(*top_class.shape)                                             
                         accuracy=accuracy+torch.mean(equality.type(torch.FloatTensor)).item()
 
                 print(f"Num {num+1}/{nums};"
@@ -163,7 +165,7 @@ def train_model(model, dataloaders, criterion, optimizer, epochs=15, cuda=False)
                 running_loss = 0
                 model.train()
 
-def test_model(model, dataloaders, cuda=False):
+def test_model(model, test_dataloader, cuda=True):
     model.eval()
     test_accuracy=0
     test_loss=0
